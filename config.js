@@ -1,8 +1,9 @@
 window.KINDRED_FIREBASE = {
-  apiKey: "AIzaSyB...",
-  authDomain: "kindred-1a2b3.firebaseapp.com",
-  projectId: "kindred-1a2b3",
-  storageBucket: "kindred-1a2b3.firebasestorage.app",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:abc123def456"
+  apiKey: "AIzaSyCwfZCpnGlvSUvlvMglNFzqfCFid4_XDtM",
+  authDomain: "kindred-95f9e.firebaseapp.com",
+  databaseURL: "https://kindred-95f9e-default-rtdb.firebaseio.com",
+  projectId: "kindred-95f9e",
+  storageBucket: "kindred-95f9e.firebasestorage.app",
+  messagingSenderId: "634618697876",
+  appId: "1:634618697876:web:dc4e2eead364eca71abc81"
 };
