@@ -22,13 +22,27 @@ const QUESTIONS = [
   {id:"q9", t:"S", rev:false, text:"I stay calm when plans fall apart."},
   {id:"q10",t:"S", rev:true,  text:"Small setbacks can sour my whole day."}
 ];
+const ACTIVITIES = [
+  {id:"a1",  short:"getting outdoors",     text:"Spending a free afternoon outdoors: hiking, parks, the beach, or a long walk"},
+  {id:"a2",  short:"sports",  text:"Playing a sport, going to the gym, or running with someone"},
+  {id:"a3",  short:"cooking",     text:"Cooking or baking together, or trying a restaurant you've never been to"},
+  {id:"a4",  short:"making things",        text:"Hands-on projects: crafts, painting, woodworking, or fixing things up"},
+  {id:"a5",  short:"nights out", text:"Concerts, live shows, comedy, or a night out dancing"},
+  {id:"a6",  short:"games",                text:"Board games, card games, video games, or trivia nights"},
+  {id:"a7",  short:"books",      text:"Reading, a book club, podcasts, or going to a talk"},
+  {id:"a8",  short:"museums and shows",  text:"Museums, galleries, theater, or film screenings"},
+  {id:"a9",  short:"volunteering",         text:"Volunteering or helping out at community events"},
+  {id:"a10", short:"travel", text:"Day trips, road trips, or planning a vacation"},
+  {id:"a11", short:"low-key hangouts",     text:"Relaxed time at home: a movie, coffee, or just talking"},
+  {id:"a12", short:"learning new skills",  text:"Taking a class, learning a language, or picking up a new skill"}
+];
 const INTERESTS = ["Hiking","Board games","Cooking","Live music","Reading","Running","Film","Art museums","Coffee","Gaming","Climbing","Gardening","Photography","Volunteering","Trivia","Tech","Dancing","Travel"];
 const SIZES = {one:"One-on-one", small:"Small group", big:"Big group"};
 const TIMES = {early:"Early bird", day:"Daytime", night:"Night owl"};
 const FREQS = {weekly:"Every week", month:"A few times a month", now:"Now and then"};
 const AVC = ["--av1","--av2","--av3","--av4","--av5","--av6"];
 const SAMPLE = {sample:true, name:"", zip:"", area:"", about:"", ideal:"", contact:"",
-  answers:{q1:4,q2:2,q3:3,q4:3,q5:3,q6:3,q7:4,q8:2,q9:4,q10:2},
+  answers:{q1:4,q2:2,q3:3,q4:3,q5:3,q6:3,q7:4,q8:2,q9:4,q10:2,a1:5,a2:3,a3:4,a4:2,a5:2,a6:4,a7:4,a8:3,a9:3,a10:4,a11:4,a12:3},
   ints:["Hiking","Cooking","Board games","Coffee","Reading"], size:"small", time:"day", freq:"month"};
 
 // ---------- storage ----------
@@ -47,7 +61,7 @@ const S = {
   myId:null, email:"", loaded:false, error:"",
   members:[], myDoc:null, wavesOut:new Set(), wavesIn:new Set(), contacts:{}, unsub:[],
   zips:null, view:"matches",
-  ui:{radius: load("kindred.radius", 10), sort:"score", filter:"All"}
+  ui:{radius: load("kindred.radius", 10), sort:"score", filter:"All", everySort: load("kindred.everySort", "best")}
 };
 let me = load("kindred.draft", null) || structuredClone(SAMPLE);
 
@@ -77,10 +91,33 @@ function score(p){
   const order = {one:0,small:1,big:2}, tOrder = {early:0,day:1,night:2}, fOrder = {weekly:0,month:1,now:2};
   const near = (o,a,b)=> (o[a]==null||o[b]==null) ? .5 : 1 - Math.abs(o[a]-o[b])/2;
   const lsim = (near(order,me.size,p.size) + near(tOrder,me.time,p.time) + near(fOrder,me.freq,p.freq))/3;
-  return {total: Math.round((0.45*tsim + 0.35*isim + 0.20*lsim) * 100), shared, reasons: reasons(t,p,shared)};
+  const act = activityFit(me.answers, p.answers);
+  // Weights: personality, free-time activities, interests, logistics. Activities drop out if either person hasn't answered them.
+  const parts = act ? [[0.35,tsim],[0.25,act.sim],[0.25,isim],[0.15,lsim]] : [[0.45,tsim],[0.35,isim],[0.20,lsim]];
+  const total = Math.round(parts.reduce((s,[w,v])=>s+w*v,0) / parts.reduce((s,[w])=>s+w,0) * 100);
+  return {total, shared, bothLove: act ? act.bothLove : [], reasons: reasons(t,p,shared,act)};
 }
-function reasons(t,p,shared){
+const actVal = (ans, id) => { const v = +ans?.[id]; return v>=1 && v<=5 ? v : null; };
+function hasActivities(ans){ return ACTIVITIES.some(a=> actVal(ans, a.id) != null); }
+function activityFit(mine, theirs){
+  let n = 0, sum = 0; const bothLove = [];
+  ACTIVITIES.forEach(a=>{
+    const x = actVal(mine, a.id), y = actVal(theirs, a.id);
+    if(x == null || y == null) return;
+    n++;
+    // Shared enthusiasm counts double: two people who both love something have more to do together.
+    const w = (x>=4 && y>=4) ? 2 : 1;
+    sum += w * (1 - Math.abs(x-y)/4); n += w - 1;
+    if(x>=4 && y>=4) bothLove.push({a, s:x+y});
+  });
+  if(n < 4) return null;
+  bothLove.sort((p,q)=> q.s - p.s);
+  return {sim: sum/n, bothLove: bothLove.map(b=>b.a)};
+}
+function reasons(t,p,shared,act){
   const r = [];
+  if(act && act.bothLove.length >= 2) r.push(`You both love ${act.bothLove[0].short} and ${act.bothLove[1].short}`);
+  else if(act && act.bothLove.length === 1) r.push(`You both love ${act.bothLove[0].short}`);
   if(shared.length >= 2) r.push(`You both enjoy ${shared.slice(0,2).join(" and ").toLowerCase()}${shared.length>2?` (+${shared.length-2} more)`:""}`);
   else if(shared.length === 1) r.push(`You share an interest in ${shared[0].toLowerCase()}`);
   const both = k => (t[k]>=3.75 && p.tr[k]>=3.75) ? "hi" : (t[k]<=2.25 && p.tr[k]<=2.25) ? "lo" : null;
@@ -92,7 +129,7 @@ function reasons(t,p,shared){
     S:{hi:"You both stay steady when plans fall apart", lo:null}
   };
   for(const k of ["E","O","C","A","S"]){ const b = both(k); if(b && lines[k][b]){ r.push(lines[k][b]); if(r.length>=3) break; } }
-  if(r.length < 3 && me.time === p.time && TIMES[p.time]) r.push(`You're both ${TIMES[p.time].toLowerCase()}s`);
+  if(r.length < 3 && me.time === p.time && TIMES[p.time]) r.push({early:"You're both early birds", day:"You both like daytime plans", night:"You're both night owls"}[p.time]);
   if(r.length < 3 && me.size === p.size && SIZES[p.size]) r.push(`You both prefer ${SIZES[p.size].toLowerCase()} hangouts`);
   let gap = null, g = 0;
   TRAITS.forEach(tr=>{ const d = Math.abs(t[tr.k]-p.tr[tr.k]); if(d>g){ g=d; gap=tr; } });
@@ -230,6 +267,7 @@ function notices(){
   if(S.error) h += `<div class="notice" role="status">${esc(S.error)}</div>`;
   if(fb && !S.myId) h += `<div class="banner"><span><b>Sign in to see members near you.</b> Use your Google account or an email and password.</span><button class="btn small" data-go="quiz">Take the quiz</button><button class="btn small ghost" data-signin="1">Sign in</button></div>`;
   else if(me.sample) h += `<div class="banner"><span><b>You're seeing sample answers.</b> Take the 3-minute quiz to find your own matches.</span><button class="btn small" data-go="quiz">Take the quiz</button></div>`;
+  else if(S.myDoc && !hasActivities(S.myDoc.answers)) h += `<div class="banner"><span><b>New: free-time questions.</b> Answer 12 quick questions about what you like to do, and your matches get more accurate.</span><button class="btn small" data-go="quiz" data-scroll="fs-free">Answer them</button></div>`;
   else if(S.myId && S.loaded && !S.myDoc) h += `<div class="banner"><span><b>Your profile isn't saved yet.</b> Finish the quiz so other members can match with you.</span><button class="btn small" data-go="quiz">Finish the quiz</button></div>`;
   return h;
 }
@@ -278,29 +316,45 @@ function renderMatches(){
   document.getElementById("sort").addEventListener("change", e=>{ S.ui.sort = e.target.value; renderMatches(); });
 }
 
+const EVERY_SORTS = {best:"Best match first", worst:"Lowest match first", near:"Closest first", far:"Farthest first", name:"Name (A–Z)"};
 function renderEveryone(){
-  const list = S.members.filter(p=> S.ui.filter==="All" || p.ints.includes(S.ui.filter)).map(p=>({p,s:score(p)})).sort((a,b)=> a.p.name.localeCompare(b.p.name));
+  const mode = EVERY_SORTS[S.ui.everySort] ? S.ui.everySort : "best";
+  const list = S.members.filter(p=> S.ui.filter==="All" || p.ints.includes(S.ui.filter)).map(p=>({p, s:score(p), d:distance(p)}));
+  const byName = (a,b)=> a.p.name.localeCompare(b.p.name);
+  const sorters = {
+    best:  (a,b)=> b.s.total - a.s.total || byName(a,b),
+    worst: (a,b)=> a.s.total - b.s.total || byName(a,b),
+    near:  (a,b)=> (a.d ?? Infinity) - (b.d ?? Infinity) || byName(a,b),
+    far:   (a,b)=> (b.d ?? -Infinity) - (a.d ?? -Infinity) || byName(a,b),
+    name:  byName
+  };
+  list.sort(sorters[mode]);
+  const noDist = (mode==="near" || mode==="far") && !ll(me.zip);
   const emptyMsg = !S.myId ? "Sign in to see who's here." : S.members.length ? `No one lists ${esc(S.ui.filter.toLowerCase())} yet.` : "No one else has joined yet. Share the link so friends can take the quiz.";
   document.getElementById("v-everyone").innerHTML = `
     <div class="intro"><div><h1>The Kindred community</h1><p>Everyone at any distance${S.myId?`: ${S.members.length} member${S.members.length===1?"":"s"} besides you`:""}.</p></div></div>
     ${notices()}
-    <div class="toolbar"><label for="ifilter">Interest <select id="ifilter"><option>All</option>${INTERESTS.map(i=>`<option ${S.ui.filter===i?"selected":""}>${i}</option>`).join("")}</select></label>
+    <div class="toolbar">
+      <label for="esort">Sort <select id="esort">${Object.entries(EVERY_SORTS).map(([k,v])=>`<option value="${k}" ${mode===k?"selected":""}>${v}</option>`).join("")}</select></label>
+      <label for="ifilter">Interest <select id="ifilter"><option>All</option>${INTERESTS.map(i=>`<option ${S.ui.filter===i?"selected":""}>${i}</option>`).join("")}</select></label>
       <span class="count">${list.length} ${list.length===1?"person":"people"}</span></div>
+    ${noDist?`<p class="field-hint" style="margin:-4px 0 14px">Add your ZIP code in the quiz to sort by distance.</p>`:""}
     ${list.length?`<div class="list">${list.map(x=>card(x.p,x.s)).join("")}</div>`:`<div class="empty">${emptyMsg}</div>`}`;
   document.getElementById("ifilter").addEventListener("change", e=>{ S.ui.filter = e.target.value; renderEveryone(); });
+  document.getElementById("esort").addEventListener("change", e=>{ S.ui.everySort = e.target.value; save("kindred.everySort", e.target.value); renderEveryone(); });
 }
 
 function renderQuiz(){
   const blank = me.sample;
   const src = me, a = blank ? {} : src.answers, pre = blank ? {ints:[], size:"", time:"", freq:""} : src;
-  const likert = q => `<div class="q"><p id="l-${q.id}">${q.text}</p>
-    <div class="likert" role="radiogroup" aria-labelledby="l-${q.id}"><span class="end">Not me</span>
+  const likert = (q, lo="Not me", hi="So me") => `<div class="q"><p id="l-${q.id}">${q.text}</p>
+    <div class="likert" role="radiogroup" aria-labelledby="l-${q.id}"><span class="end">${lo}</span>
     ${[1,2,3,4,5].map(v=>`<input type="radio" name="${q.id}" id="${q.id}-${v}" value="${v}" ${+a[q.id]===v?"checked":""}><label for="${q.id}-${v}">${v}</label>`).join("")}
-    <span class="end">So me</span></div></div>`;
+    <span class="end">${hi}</span></div></div>`;
   const radios = (name, opts, cur) => `<div class="pick" role="radiogroup">${Object.entries(opts).map(([k,v])=>`<input type="radio" name="${name}" id="${name}-${k}" value="${k}" ${cur===k?"checked":""}><label for="${name}-${k}">${v}</label>`).join("")}</div>`;
   const val = k => blank ? "" : esc(src[k] || "");
   document.getElementById("v-quiz").innerHTML = `
-    <div class="intro"><div><h1>${S.myDoc?"Update your profile.":"Tell us how you friend."}</h1><p>Ten quick statements, a few interests, and how you like to hang out. Signed-in members can see your profile so they can match with you.</p></div></div>
+    <div class="intro"><div><h1>${S.myDoc?"Update your profile.":"Tell us how you friend."}</h1><p>Ten statements about your personality, twelve about how you like to spend free time, a few interests, and how you like to hang out. Signed-in members can see your profile so they can match with you.</p></div></div>
     ${S.error?`<div class="notice" role="status">${esc(S.error)}</div>`:""}
     <form class="quiz" id="quiz" novalidate>
       <fieldset><legend>About you</legend>
@@ -312,7 +366,8 @@ function renderQuiz(){
         <div class="row"><div><label class="t" for="fcontact">How to reach you</label><input type="text" id="fcontact" value="${val("contact")}" maxlength="100" placeholder="Optional, e.g. an Instagram handle">
           <p class="field-hint">Only shown to people you've both waved at.</p></div></div>
       </fieldset>
-      <fieldset><legend>Your personality</legend><p class="hint">How well does each statement describe you?</p>${QUESTIONS.map(likert).join("")}</fieldset>
+      <fieldset><legend>Your personality</legend><p class="hint">How well does each statement describe you?</p>${QUESTIONS.map(q=>likert(q)).join("")}</fieldset>
+      <fieldset id="fs-free"><legend>Your free time</legend><p class="hint">How much do you enjoy each of these?</p>${ACTIVITIES.map(q=>likert(q,"Not for me","Love it")).join("")}</fieldset>
       <fieldset><legend>What you're into</legend><p class="hint">Pick 3 to 6.</p>
         <div class="pick" id="ints">${INTERESTS.map((i,n)=>`<input type="checkbox" id="int-${n}" value="${i}" ${pre.ints.includes(i)?"checked":""}><label for="int-${n}">${i}</label>`).join("")}</div></fieldset>
       <fieldset><legend>How you like to hang out</legend>
@@ -340,7 +395,10 @@ function renderQuiz(){
     if(!name){ err.textContent = "Add your first name so matches know who you are."; return; }
     if(!/^\d{5}$/.test(zip)){ err.textContent = "Enter a 5-digit US ZIP code."; return; }
     if(S.zips && !S.zips[zip]){ err.textContent = `We don't recognize ZIP ${zip}. Check it and try again.`; return; }
-    if(missing){ err.textContent = `Answer all ten statements (${missing} left).`; return; }
+    if(missing){ err.textContent = `Answer all ten personality statements (${missing} left).`; return; }
+    let missingAct = 0;
+    ACTIVITIES.forEach(q=>{ const c = form.querySelector(`input[name=${q.id}]:checked`); if(c) answers[q.id] = +c.value; else missingAct++; });
+    if(missingAct){ err.textContent = `Answer all twelve free-time questions (${missingAct} left).`; document.getElementById("fs-free").scrollIntoView({behavior:"smooth", block:"start"}); return; }
     if(ints.length < 3){ err.textContent = "Pick at least 3 interests."; return; }
     if(!pick("size") || !pick("time") || !pick("freq")){ err.textContent = "Choose a group size, time of day, and how often."; return; }
     const p = {sample:false, name, zip, area:document.getElementById("farea").value.trim(), about:document.getElementById("fabout").value.trim(),
@@ -392,6 +450,8 @@ function renderProfile(){
       <div class="legend" style="margin-bottom:10px"><span><i></i>You</span><span><i class="them"></i>${first(p.name)}</span></div>
       ${traitBars(t, p.tr)}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Interests</div><div class="chips">${p.ints.map(i=>`<span class="chip${s.shared.includes(i)?" shared":""}">${esc(i)}</span>`).join("")}</div></div>
+    ${(()=>{ const favs = ACTIVITIES.filter(a=> actVal(p.answers, a.id) >= 4);
+      return favs.length ? `<div><div class="eyebrow" style="margin-bottom:6px">Loves doing</div><div class="chips">${favs.map(a=>`<span class="chip${s.bothLove.includes(a)?" shared":""}">${esc(a.short[0].toUpperCase()+a.short.slice(1))}</span>`).join("")}</div></div>` : ""; })()}
     <dl class="facts"><dt>Hangouts</dt><dd>${SIZES[p.size]}</dd><dt>Best time</dt><dd>${TIMES[p.time]}</dd><dt>How often</dt><dd>${FREQS[p.freq]}</dd></dl>
     ${waveBtn(p)}`;
 }
@@ -500,7 +560,7 @@ document.addEventListener("click", e=>{
   const n = e.target.closest("[data-view],[data-go],[data-open],[data-wave],[data-signin]");
   if(!n) return;
   if(n.dataset.view) go(n.dataset.view);
-  else if(n.dataset.go){ closeSheet(); go(n.dataset.go); }
+  else if(n.dataset.go){ closeSheet(); go(n.dataset.go); const t = n.dataset.scroll && document.getElementById(n.dataset.scroll); if(t) t.scrollIntoView({behavior:"smooth", block:"start"}); }
   else if(n.dataset.open) openProfile(n.dataset.open);
   else if(n.dataset.wave) sendWave(n.dataset.wave);
   else if(n.dataset.signin) openSignIn();
